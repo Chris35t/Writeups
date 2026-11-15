@@ -1,0 +1,362 @@
+# **🔀 Open Redirect Vulnerability — CTF & Bug Bounty Notes**
+
+## **1. What is Open Redirect?**
+
+An **Open Redirect** occurs when a website redirects users to an external, attacker-controlled website without properly validating the destination URL.
+
+**Example:**
+
+```
+https://example.com/login?redirect=https://attacker.com
+```
+
+The trusted website redirects the victim to `attacker.com`.
+
+## **2. Attack flow diagram**
+
+**👤 Victim**
+
+Clicks a trusted-looking link
+
+**🌐 Legitimate Website**
+
+`example.com/login?redirect=...`
+
+**⚠️ Weak URL Validation**
+
+Accepts external destination
+
+**💀 Attacker Website**
+
+`attacker.com`
+
+Phishing / credential theft
+
+## **3. Types of Open Redirect**
+
+| Type            | Description                           |
+| --------------- | ------------------------------------- |
+| Parameter-based | Redirect controlled by URL parameter  |
+| Referer-based   | Redirect based on HTTP Referer header |
+
+**Parameter-based example:**
+
+```
+/login?next=https://attacker.com
+/login?redirect=https://attacker.com
+```
+
+**Referer-based flow:**
+
+```
+Attacker's webpage
+       |
+       v
+Victim clicks legitimate login link
+       |
+       v
+Browser sends Referer header
+       |
+       v
+Website redirects to Referer URL
+```
+
+## **4. 🔍 Hunting methodology**
+
+**Step 1 — Find redirect parameters**
+
+Look for these parameters in URLs and Burp Suite HTTP history.
+
+```
+redirect=
+redir=
+next=
+return=
+returnurl=
+redirect_uri=
+redirecturl=
+dest=
+destination=
+forward=
+forwardurl=
+url=
+uri=
+RelayState=
+```
+
+**Step 2 — Google Dorks**
+
+Replace `example.com` with your authorized target.
+
+```
+site:example.com inurl:%3Dhttp
+
+site:example.com inurl:%3D%2F
+
+site:example.com inurl:redir
+
+site:example.com inurl:redirect
+
+site:example.com inurl:redirect_uri
+
+site:example.com inurl:returnurl
+
+site:example.com inurl:next
+
+site:example.com inurl:dest
+```
+
+**Step 3 — Test manually**
+
+Normal URL:
+
+```
+https://example.com/login?next=/dashboard
+```
+
+Test URL:
+
+```
+https://example.com/login?next=https://attacker.com
+```
+
+
+
+Vulnerability confirmed
+
+&#x20;if the application redirects to the external domain without appropriate validation.
+
+
+
+## **5. 🧪 Important bypass concept**
+
+URL parsing inconsistencies can cause security filters to interpret URLs differently from browsers.
+
+Example from the notes:
+
+```
+https://attacker.com\@example.com
+```
+
+- A validator may interpret `example.com` as the hostname.
+- A browser may normalize the backslash into a forward slash.
+- This can cause a redirect to `attacker.com`.
+
+**Remember:** Different URL parsers may interpret the same input differently.
+
+## **6. 💥 Impact of Open Redirect**
+
+**Phishing**
+
+Redirect victims from trusted domains to malicious websites.
+
+**Credential Theft**
+
+Trick users into entering their credentials on attacker-controlled pages.
+
+**OAuth Token Theft**
+
+Potentially leak sensitive tokens through redirect chains and Referer headers.
+
+**SSRF Chaining**
+
+Abuse an allowlisted endpoint that redirects requests to another destination.
+
+## **7. 🛡️ Prevention**
+
+| Defense              | Purpose                                          |
+| -------------------- | ------------------------------------------------ |
+| Allowlist            | Permit only trusted destination hosts            |
+| URL validation       | Validate parsed scheme, hostname and destination |
+| Relative URLs        | Prefer safe relative paths                       |
+| Canonicalization     | Normalize URLs before validation                 |
+| Reject external URLs | Block untrusted destinations                     |
+
+**Best practice:** Validate the final parsed destination, not just the raw URL string.
+
+## **8. ⚡ Quick CTF Cheatsheet**
+
+**Recon → Test → Confirm → Chain**
+
+```
+1. Find redirect parameters
+2. Inspect Burp HTTP history
+3. Identify absolute / relative URLs
+4. Test external destination
+5. Check Referer-based redirects
+6. Investigate URL parser bypasses
+7. Check OAuth / SSRF chaining
+8. Document impact and evidence
+```
+
+**Important HTTP header**
+
+```
+Referer: https://attacker.com/
+```
+
+**Important URL formats**
+
+```
+Absolute: https://example.com/dashboard
+
+Relative: /dashboard
+
+Redirect: ?next=/dashboard
+```
+
+## **9. 🧠 Remember this**
+
+- Open Redirect = Untrusted redirect destination.
+- `next`, `url`, `redirect`, `return` = interesting parameters.
+- Referer header = possible redirect input.
+- Allowlist = preferred defense.
+- Open Redirect can become more impactful when chained with OAuth, SSRF or phishing.
+
+**Bug bounty mindset:** Don't stop after confirming an external redirect. Investigate whether it can be chained into a higher-impact vulnerability.
+
+# **🔎 Google Dorks for Open Redirect Hunting**
+
+Google Dorking helps discover publicly indexed URLs that may contain redirect parameters. Use these techniques only on authorized bug bounty targets.
+
+## **1. Basic Google Dork Syntax**
+
+| Operator    | Purpose                         |
+| ----------- | ------------------------------- |
+| `site:`     | Search within a specific domain |
+| `inurl:`    | Find keywords inside URLs       |
+| `intitle:`  | Search page titles              |
+| `intext:`   | Search page content             |
+| `filetype:` | Find specific file formats      |
+| `"`         | Exact phrase matching           |
+| `OR`        | Search for alternatives         |
+| `-`         | Exclude results                 |
+
+## **2. Open Redirect Google Dorks**
+
+Replace `example.com` with your target domain.
+
+**A. Find absolute URL parameters**
+
+```
+site:example.com inurl:%3Dhttp
+site:example.com inurl:%3Dhttps
+```
+
+Find URLs where parameters may contain complete URLs.
+
+**B. Find relative URL parameters**
+
+```
+site:example.com inurl:%3D%2F
+```
+
+Find parameters containing encoded `/` characters.
+
+**C. Search common redirect parameters**
+
+```
+site:example.com inurl:redir
+site:example.com inurl:redirect
+site:example.com inurl:redirecturi
+site:example.com inurl:redirect_uri
+site:example.com inurl:redirecturl
+site:example.com inurl:return
+site:example.com inurl:returnurl
+site:example.com inurl:relaystate
+site:example.com inurl:forward
+site:example.com inurl:forwardurl
+site:example.com inurl:forward_url
+site:example.com inurl:url
+site:example.com inurl:uri
+site:example.com inurl:dest
+site:example.com inurl:destination
+site:example.com inurl:next
+```
+
+## **3. Google Dork Hunting Workflow**
+
+**🎯 Target Domain**
+
+`example.com`
+
+**🔎 Google Dorks**
+
+`site:` + `inurl:` + redirect keywords
+
+**📋 Collect URLs**
+
+Identify redirect parameters
+
+**🧪 Burp Suite Testing**
+
+Change destination in authorized test requests
+
+**✅ Confirm & Report**
+
+Verify external redirect and document impact
+
+## **4. Important URL Examples**
+
+| Parameter    | Example                |
+| ------------ | ---------------------- |
+| `redirect`   | `?redirect=/dashboard` |
+| `next`       | `?next=/home`          |
+| `return`     | `?return=/profile`     |
+| `dest`       | `?dest=/account`       |
+| `url`        | `?url=/welcome`        |
+| `RelayState` | `?RelayState=/home`    |
+
+## **5. URL Encoding Cheatsheet**
+
+| Character | Encoded |
+| --------- | ------- |
+| `=`       | `%3D`   |
+| `/`       | `%2F`   |
+| `:`       | `%3A`   |
+| `?`       | `%3F`   |
+| `@`       | `%40`   |
+| `\`       | `%5C`   |
+
+**Remember:**
+
+- `%3Dhttp` → parameter containing `=http`
+- `%3Dhttps` → parameter containing `=https`
+- `%3D%2F` → parameter containing `=/`
+
+## **6. Copy-Paste Google Dork Cheatsheet**
+
+**Open Redirect Recon**
+
+Quick reference
+
+```
+site:TARGET inurl:%3Dhttp
+site:TARGET inurl:%3Dhttps
+site:TARGET inurl:%3D%2F
+
+site:TARGET inurl:redirect
+site:TARGET inurl:redir
+site:TARGET inurl:redirect_uri
+site:TARGET inurl:returnurl
+site:TARGET inurl:relaystate
+site:TARGET inurl:forward
+site:TARGET inurl:destination
+site:TARGET inurl:next
+site:TARGET inurl:dest
+site:TARGET inurl:url
+site:TARGET inurl:uri
+```
+
+&#x20;Copy all dorks
+
+## **7. Important Bug Bounty Notes**
+
+- Google Dorks are for discovery, not vulnerability confirmation.
+- Indexed URLs may be outdated.
+- A redirect parameter does not automatically mean a vulnerability.
+- Verify the final `Location` response header.
+- Check whether the redirect accepts external destinations.
+- Investigate OAuth and SSRF chaining where applicable.
+
+**Golden rule:** Google finds candidates → Burp investigates → Manual testing confirms → Evidence proves the bug.
