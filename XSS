@@ -1,0 +1,557 @@
+# 🛡️ Bug Bounty Field Notes
+## Reconnaissance • Cross-Site Scripting (XSS) • Reporting
+
+> **Purpose:** A practical learning note and quick-reference sheet built from the supplied material.  
+> **Use only on systems you own or are explicitly authorized to test.** Follow the program's scope, rules, and data-handling requirements.
+
+---
+
+# 🧭 1. The Big Picture
+
+A bug bounty workflow is more than finding a payload that works. You need to understand the target, identify a real security issue, prove it safely, explain its impact, and help the organization fix it.
+
+```text
+       AUTHORIZED TARGET
+              │
+              ▼
+       ① SCOPE DISCOVERY
+              │
+              ▼
+       ② RECONNAISSANCE
+       ├── Domains & subdomains
+       ├── Ports & services
+       ├── Directories & files
+       ├── OSINT & exposed data
+       └── Technology fingerprinting
+              │
+              ▼
+       ③ TESTING
+       ├── Find input points
+       ├── Test how input is handled
+       └── Validate a security impact
+              │
+              ▼
+       ④ EVIDENCE + REPRODUCTION
+              │
+              ▼
+       ⑤ PROFESSIONAL REPORT
+              │
+              ▼
+       TRIAGE → FIX → RESOLUTION
+```
+
+**Learning rule:** Understand what each tool does before automating it. The source material recommends beginning with manual reconnaissance so you learn the process and can build a workflow that makes sense.
+
+# 🔎 2. Reconnaissance Cheat Sheet
+
+Recon is the process of collecting information about an in-scope target. Keep notes: reconnaissance data can grow quickly.
+
+## 2.1 Scope discovery
+
+| Tool / resource | What it helps you discover |
+|---|---|
+| **WHOIS** | Owner/registration information for a domain or IP |
+| **ViewDNS Reverse WHOIS** | Domains associated with a keyword in reverse WHOIS data |
+| **`nslookup`** | DNS and IP information for a host |
+| **ViewDNS Reverse IP** | Other domains hosted on the same server/IP |
+| **crt.sh** | Certificate transparency records |
+| **Censys** | Internet-facing hosts, services, and certificate information |
+| **Cert Spotter** | Certificate information for a domain |
+| **Sublist3r** | Subdomain enumeration |
+| **SubBrute** | Subdomain enumeration |
+| **Amass** | Attack-surface and subdomain enumeration |
+| **Gobuster** | Subdomain or directory/path discovery, depending on mode |
+| **SecLists** | Wordlists for subdomains, paths, and other testing |
+| **Commonspeak2** | Generates wordlists from public data |
+| **Altdns** | Finds subdomains through common-name permutations |
+| **Nmap** | Scans for open ports and services |
+| **Masscan** | High-speed port scanning |
+| **Shodan** | Finds internet-exposed services using its index |
+| **Project Sonar** | Internet-wide scan data and research |
+| **Dirsearch** | Directory and file-path discovery |
+| **EyeWitness** | Captures screenshots of many URLs |
+| **Snapper** | Captures screenshots of URL lists |
+| **OWASP ZAP** | Proxy, scanner, and web spider |
+| **GrayhatWarfare** | Searches for publicly exposed cloud-storage buckets |
+| **Lazys3** | Bucket-name discovery using keywords |
+| **Bucket Stream** | Bucket discovery using keyword-based techniques |
+
+### 🧩 Recon workflow diagram
+
+```text
+Domain / Organization
+        │
+        ├── WHOIS ───────────────► Ownership clues
+        │
+        ├── DNS / nslookup ──────► IP addresses
+        │
+        ├── Certificate search ──► Related hostnames
+        │
+        ├── Subdomain tools ─────► Subdomain list
+        │
+        ├── Nmap / Masscan ──────► Open ports & services
+        │
+        ├── Shodan / Censys ─────► Indexed exposed services
+        │
+        ├── Dirsearch / Gobuster ► Web paths
+        │
+        └── EyeWitness ──────────► Visual review
+                                      │
+                                      ▼
+                               Interesting assets
+```
+
+**Important:** A discovered hostname, IP, service, or bucket is not automatically in scope. Verify it against the program policy before interacting with it.
+
+## 2.2 OSINT resources
+
+| Tool / resource | Purpose |
+|---|---|
+| **Google Hacking Database (GHDB)** | Search patterns that can reveal exposed files or interesting pages |
+| **KeyHacks** | Helps assess whether discovered credentials may be valid and understand related services |
+| **Gitrob** | Finds potentially sensitive files in public GitHub repositories |
+| **TruffleHog** | Searches repositories for secrets and high-entropy strings |
+| **PasteHunter** | Searches paste sites for potentially sensitive information |
+| **Wayback Machine** | Views archived versions of websites |
+| **waybackurls** | Retrieves URLs known to the Wayback Machine |
+
+## 2.3 Technology fingerprinting
+
+| Tool / resource | Purpose |
+|---|---|
+| **CVE database** | Looks up publicly disclosed vulnerabilities |
+| **Wappalyzer** | Identifies web technologies, frameworks, and languages |
+| **BuiltWith** | Shows technologies used by a website |
+| **StackShare** | Provides information about technology stacks |
+| **Retire.js** | Detects outdated JavaScript libraries and Node.js packages |
+
+### Fingerprinting flow
+
+```text
+Website
+  │
+  ├── Identify CMS / framework / language
+  ├── Identify JavaScript libraries
+  ├── Check versions where possible
+  └── Research relevant known vulnerabilities
+                 │
+                 ▼
+       Validate applicability manually
+```
+
+A technology match alone does **not** prove that a target is vulnerable. Confirm the version, configuration, exposure, and actual behavior.
+
+## 2.4 Automation
+
+- **Git:** Version-control system. `git diff` helps track changes in files and notes.
+- **Nuclei:** Recon and vulnerability-scanning workflows.
+- **Intrigue Core:** Reconnaissance and attack-surface management platform.
+
+**Recommended progression from the source:** start manually with individual tools or small scripts; understand the results; then introduce recon platforms to improve efficiency.
+
+# 🌐 3. Cross-Site Scripting (XSS)
+
+## 3.1 What is XSS?
+
+Cross-Site Scripting occurs when an application handles untrusted input in a way that allows attacker-controlled script or markup to execute in another user's browser.
+
+The source notes mention cookie hijacking as an XSS risk. **Clarification:** cookie theft is only one possible impact, and modern protections such as `HttpOnly`, `Secure`, and `SameSite` affect what an attacker can do. XSS can also enable actions in the victim's session, alter page content, or capture information displayed in the page. Demonstrate impact safely and never collect real users' data.
+
+## 3.2 Main XSS categories
+
+| Type | Where the payload goes | When it executes |
+|---|---|---|
+| **Reflected XSS** | Often returned immediately in a response | When a crafted request/page is opened |
+| **Stored XSS** | Saved by the application, such as in a comment or profile | When a user later views the stored content |
+| **DOM-based XSS** | Unsafe client-side JavaScript/DOM handling | When browser-side code processes attacker-controlled data |
+| **Blind XSS** | Submitted to a location that may be viewed elsewhere | Later, in a browser you may not directly observe |
+
+### Stored XSS flow
+
+```text
+Tester submits input
+        │
+        ▼
+Application stores input
+        │
+        ▼
+Another user opens the affected page
+        │
+        ▼
+Unsafe output handling
+        │
+        ▼
+Script executes in that page's browser
+```
+
+### Reflected XSS flow
+
+```text
+Crafted request ──► Web application
+                         │
+                         ▼
+                 Input reflected in response
+                         │
+                         ▼
+                Browser interprets unsafe output
+                         │
+                         ▼
+                    Script executes
+```
+
+## 3.3 Step 1 — Find input opportunities
+
+Look for places where user-controlled data enters the application.
+
+**Potential input locations:**
+- Search boxes and forms
+- Name and username fields during sign-up
+- Comment fields
+- User profiles
+- Blog posts
+- Drop-down menus
+- Numeric fields and other inputs that appear restricted by the UI
+
+### Proxy testing concept
+
+A browser may restrict what can be entered into a field. An intercepting web proxy lets an authorized tester inspect and modify the HTTP request before forwarding it.
+
+Example request body:
+
+```http
+POST /edit_user_age
+Content-Type: application/x-www-form-urlencoded
+
+age=20
+```
+
+In an authorized test, inspect whether server-side validation actually enforces the expected type and whether the value is safely handled when displayed. Do not assume browser-side restrictions are security controls.
+
+## 3.4 Step 2 — Test safely
+
+Start with a harmless proof of execution:
+
+```html
+<script>alert(1)</script>
+```
+
+Other simple test patterns from the source include:
+
+```html
+<iframe src="javascript:alert(1)"></iframe>
+<body onload="alert(1)"></body>
+"><img src=x onerror=alert(1)>
+<a onmouseover="alert(1)">test</a>
+```
+
+These are **test strings, not universal bypasses**. Whether they work depends on the HTML/JavaScript context, browser behavior, content security policy, and application defenses.
+
+### What to observe
+
+1. Does the application reject the input?
+2. Is the input reflected in the response?
+3. Is the input stored and shown later?
+4. Are special characters encoded or escaped?
+5. In which HTML/JavaScript context does the value appear?
+6. Does harmless JavaScript execute?
+7. Can you reproduce the behavior consistently?
+
+### Character-handling probe
+
+The source recommends testing how the application handles special characters before constructing a payload:
+
+```text
+>'<"//:=;!--
+```
+
+Observe which characters are escaped, encoded, removed, or rendered. This helps you understand the output context. Do not treat a single response as proof that every page or context is safe.
+
+## 3.5 Common payload patterns — what they demonstrate
+
+| Pattern | Concept being tested |
+|---|---|
+| `<script>alert(1)</script>` | Script element execution |
+| `<iframe src="javascript:alert(1)">` | JavaScript URL handling in an iframe context |
+| `<body onload=alert(1)>` | HTML event-handler execution |
+| `<img src=x onerror=alert(1)>` | Event handler after an image-loading error |
+| `<a onmouseover="alert(1)">test</a>` | Event handler triggered by user interaction |
+| External script reference | Whether the page loads attacker-controlled script content |
+
+Some examples in older material may be malformed or behave differently in modern browsers. Always inspect the actual rendered HTML and browser behavior rather than memorizing payloads.
+
+## 3.6 Blind XSS — the idea
+
+Blind XSS is difficult to observe because the submitted input may execute later in a different interface or user's browser.
+
+```text
+Tester submits a harmless marker
+              │
+              ▼
+       Application stores it
+              │
+              ▼
+     Staff/admin views the record
+              │
+              ▼
+       Browser processes the data
+              │
+              ▼
+     Tester observes a controlled callback
+```
+
+The source mentions XSS Hunter as a tool that can help automate blind-XSS testing. Use only a callback endpoint you control, with a harmless marker. Do not use this technique to collect cookies, tokens, personal information, or other user data.
+
+## 3.7 Filter and encoding concepts
+
+The source discusses using JavaScript `String.fromCharCode()` to construct strings from character codes when quote characters are filtered.
+
+Example concept:
+
+```javascript
+String.fromCharCode(72, 101, 108, 108, 111)
+```
+
+This evaluates to the string:
+
+```text
+Hello
+```
+
+This is an encoding/representation technique, **not a security fix or a guaranteed filter bypass**. Blocking quotes or the word `script` is not a reliable XSS defense.
+
+### Encoding terms in the source
+
+| Encoding | Basic idea |
+|---|---|
+| **Base64** | Represents binary data using a restricted set of printable characters |
+| **Hex** | Represents bytes using hexadecimal digits (`0–9`, `a–f`) |
+
+Encoding is not encryption. Encoded data may be decoded by anyone who knows the encoding.
+
+## 3.8 Confirm impact responsibly
+
+A good test should answer:
+- What user-controlled input causes the issue?
+- Where is it reflected or stored?
+- Which page and browser context process it?
+- Does harmless script execution occur?
+- Which users or roles can reach the affected page?
+- What realistic security impact follows?
+
+Avoid escalating a proof of concept into real account compromise or data collection. Use a harmless marker and explain the potential impact without accessing other users' information.
+
+# 📝 4. Writing a Strong Vulnerability Report
+
+A report should help the developer reproduce, understand, prioritize, and fix the issue.
+
+## 4.1 Report structure
+
+```text
+┌──────────────────────────────────────────┐
+│ 1. TITLE                                 │
+│    Clear vulnerability + affected area   │
+├──────────────────────────────────────────┤
+│ 2. SUMMARY                               │
+│    What is wrong and where?              │
+├──────────────────────────────────────────┤
+│ 3. SEVERITY                              │
+│    Informational / Low / Medium / High   │
+│    / Critical                            │
+├──────────────────────────────────────────┤
+│ 4. REPRODUCTION STEPS                    │
+│    Exact steps and required conditions   │
+├──────────────────────────────────────────┤
+│ 5. PROOF OF CONCEPT                      │
+│    Harmless, repeatable evidence         │
+├──────────────────────────────────────────┤
+│ 6. IMPACT & ATTACK SCENARIO              │
+│    What could an attacker realistically  │
+│    achieve?                              │
+├──────────────────────────────────────────┤
+│ 7. MITIGATION                            │
+│    Practical remediation guidance        │
+└──────────────────────────────────────────┘
+```
+
+### Report-writing checklist
+
+- [ ] Title identifies the vulnerability and affected feature.
+- [ ] Summary is clear and concise.
+- [ ] Severity is justified.
+- [ ] Reproduction steps are numbered and repeatable.
+- [ ] Proof of concept is included and safe.
+- [ ] Expected and actual behavior are explained.
+- [ ] Impact and realistic attack scenario are described.
+- [ ] Mitigation gives developers a useful direction.
+- [ ] Screenshots or request/response evidence are included where useful.
+- [ ] The report follows the program's submission policy.
+
+## 4.2 Severity and CVSS
+
+The source recommends studying the **Common Vulnerability Scoring System (CVSS)** at FIRST:
+
+- CVSS official site: https://www.first.org/cvss/
+
+Do not choose severity based only on the vulnerability name. Explain the conditions and impact that support the rating, and follow the program's severity policy.
+
+## 4.3 Example report outline — XSS
+
+```text
+Title:
+Stored Cross-Site Scripting in [Feature]
+
+Summary:
+User-controlled input submitted through [feature] is stored and later
+rendered without safe output handling. A harmless test demonstrated
+JavaScript execution when the affected page was viewed.
+
+Severity:
+[Select and justify according to program policy / CVSS]
+
+Affected asset:
+[In-scope host and affected path]
+
+Steps to reproduce:
+1. Sign in using an authorized test account.
+2. Open [affected feature].
+3. Submit the harmless test string.
+4. Visit the page where the value is displayed.
+5. Observe the harmless proof of execution.
+
+Proof of concept:
+<script>alert(1)</script>
+
+Impact:
+Explain which users can view the affected content and what an attacker
+could realistically do in that context. Do not claim cookie theft or
+account takeover unless that impact is actually demonstrated and allowed.
+
+Mitigation:
+Apply context-aware output encoding. Use safe DOM APIs and avoid
+inserting untrusted data as executable HTML. Add appropriate defense-in-depth
+controls, and validate the fix in every affected rendering context.
+```
+
+# 📬 5. Bug Bounty Triage Vocabulary
+
+| Term | Meaning in the supplied notes |
+|---|---|
+| **Informational** | Informative only; not necessarily a security vulnerability |
+| **Duplicate** | Another researcher has already reported the issue |
+| **N/A** | Not applicable |
+| **Triaged** | The bounty or developer team is reviewing/working on the report |
+| **Resolved** | The vulnerability has been fixed |
+
+A status label can vary by platform. Read the specific program's definitions rather than assuming every platform uses identical terminology.
+
+# 🤝 6. Why Reports Get Dismissed
+
+The source highlights these common causes:
+
+1. **You do not chain bugs:** You miss how multiple weaknesses may combine into a meaningful impact.
+2. **You do not read the policy correctly:** The asset or testing method may be out of scope.
+3. **You do not think from the organization's perspective:** You do not explain the realistic business or security impact.
+4. **You ignore duplicates:** The issue may already have been reported.
+5. **You write poor reports:** The developer cannot reproduce or understand the finding.
+
+### Before submitting — ask yourself
+
+```text
+Is the asset in scope?
+       │
+       ▼
+Did I reproduce the issue?
+       │
+       ▼
+Is there a real security impact?
+       │
+       ▼
+Is my evidence clear and safe?
+       │
+       ▼
+Did I check for duplicates / policy exclusions?
+       │
+       ▼
+Can the developer reproduce and fix it?
+       │
+       ▼
+     SUBMIT
+```
+
+The source also emphasizes handling conflict and building connections. Keep communication factual, professional, and respectful. A report is a technical handoff, not an argument.
+
+# 📚 7. Standards and Further Reading
+
+| Resource | Why it matters |
+|---|---|
+| **OWASP Web Security Testing Guide (WSTG)** | Structured methodology for web application security testing |
+| **OWASP Mobile Application Security Testing Guide (MASTG)** | Methodology and guidance for mobile application security testing |
+| **FIRST CVSS** | Vulnerability severity scoring framework |
+| **OWASP XSS Filter Evasion Cheat Sheet** | Historical and technical examples of XSS-related filter behavior; use for understanding, not as a substitute for context-aware testing |
+
+Links:
+- FIRST: https://www.first.org/
+- OWASP WSTG: https://owasp.org/www-project-web-security-testing-guide/
+- OWASP MASTG: https://mas.owasp.org/MASTG/
+- OWASP XSS Filter Evasion Cheat Sheet: https://owasp.org/www-community/xss-filter-evasion-cheatsheet
+
+# ⚡ 8. Quick-Revision Cheat Sheet
+
+## Recon
+- **WHOIS** → ownership / registration clues
+- **nslookup** → DNS / IP information
+- **crt.sh** → certificate records
+- **Amass / Sublist3r / SubBrute** → subdomains
+- **Nmap / Masscan** → ports
+- **Shodan / Censys** → indexed exposed services
+- **Gobuster / Dirsearch** → paths and directories
+- **EyeWitness / Snapper** → screenshots
+- **GHDB / Wayback Machine / waybackurls** → OSINT and historical URLs
+- **Wappalyzer / BuiltWith / StackShare** → technology stack
+- **Retire.js / CVE database** → outdated libraries and known vulnerability research
+- **Git / git diff** → track changes
+- **Nuclei / Intrigue Core** → recon automation
+
+## XSS
+- **Reflected** → input comes back in the response
+- **Stored** → input is saved and shown later
+- **DOM-based** → client-side code handles data unsafely
+- **Blind** → execution occurs somewhere you may not directly observe
+- **First locate input** → forms, search, profile, comments, posts, dropdowns, numeric fields
+- **Then inspect context** → response, stored page, DOM, escaping, encoding
+- **Prove safely** → harmless marker such as `alert(1)`
+- **Assess impact** → user roles, reachability, realistic consequences
+- **Report clearly** → steps, evidence, impact, mitigation
+
+## Reporting
+**Title → Summary → Severity → Reproduction → PoC → Impact → Mitigation**
+
+## Encoding
+- Base64 = representation, not encryption
+- Hex = byte values represented with hexadecimal digits
+- `String.fromCharCode()` = builds a string from character codes
+
+# 🎯 9. Beginner Learning Route
+
+Use this sequence to turn the notes into practical skill:
+
+| Stage | Learn | Practice output |
+|---|---|---|
+| 1 | Scope and program policy | A clean in-scope asset list |
+| 2 | Manual recon | Notes containing domains, DNS, ports, and technologies |
+| 3 | OSINT | A list of useful public references and historical URLs |
+| 4 | Web input mapping | A list of input points and where each value appears |
+| 5 | XSS fundamentals | Explain reflected vs stored vs DOM vs blind XSS |
+| 6 | Safe validation | Reproduce harmless script execution in a legal lab |
+| 7 | Impact analysis | A realistic, evidence-based impact statement |
+| 8 | Report writing | A complete report a developer can reproduce |
+
+**Practice habit:** For every tool, write down (1) what it does, (2) what input it needs, (3) what output it gives, and (4) what the output does *not* prove.
+
+---
+
+## 🧠 Final mental model
+
+**Recon finds the surface. Testing finds behavior. Evidence proves the issue. Impact explains why it matters. A good report helps get it fixed.**
+
+> **Golden rule:** Stay in scope, test safely, keep evidence, and make every report useful to the people fixing the vulnerability.
