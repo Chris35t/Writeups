@@ -1,0 +1,365 @@
+1. cut – Extract columns, characters and fields
+Syntax:
+cut [OPTIONS] filename
+
+
+Example file (creds.txt):
+admin;password123;admin@example.com
+john;secret456;john@example.com
+alice;qwerty789;alice@example.com
+root;toor;root@example.com
+
+
+Field extraction
+Command	Explanation
+cut -d';' -f1 creds.txt	Extract first field
+cut -d';' -f2 creds.txt	Extract second field
+cut -d';' -f3 creds.txt	Extract third field
+cut -d';' -f1,3 creds.txt	Extract fields 1 and 3
+cut -d';' -f1-2 creds.txt	Extract fields 1 to 2
+cut -d';' -f2- creds.txt	Extract field 2 onwards
+cut -d';' -f-2 creds.txt	Extract first 2 fields
+
+Character slicing
+cut -c1 file.txt       # First character
+cut -c1-5 file.txt     # Characters 1–5
+cut -c3-8 file.txt     # Characters 3–8
+cut -c5- file.txt      # Character 5 onwards
+cut -c-4 file.txt      # First 4 characters
+cut -c1,3,5 file.txt   # Characters 1, 3, 5
+
+
+Byte slicing
+cut -b1-5 file.txt
+cut -b3-8 file.txt
+cut -b5- file.txt
+
+
+Useful when examining binary-like text or fixed-width ASCII data.
+Custom delimiter examples
+cut -d':' -f1 /etc/passwd
+cut -d':' -f7 /etc/passwd
+cut -d' ' -f1 file.txt
+cut -d'|' -f2 file.txt
+cut -d',' -f1 file.csv
+cut -d'=' -f2 file.txt
+
+
+CTF example: Extract usernames and passwords
+cut -d';' -f1 creds.txt > users.txt
+cut -d';' -f2 creds.txt > passwords.txt
+
+
+
+2. awk – Advanced column extraction and slicing
+awk is one of the most useful tools for CTF text processing.
+
+Syntax:
+awk 'PATTERN { ACTION }' file.txt
+
+
+Column extraction
+awk '{print $1}' file.txt
+awk '{print $2}' file.txt
+awk '{print $1,$3}' file.txt
+awk '{print $NF}' file.txt
+awk '{print $(NF-1)}' file.txt
+
+
+Custom delimiters
+awk -F';' '{print $1}' creds.txt
+awk -F';' '{print $2}' creds.txt
+awk -F':' '{print $1}' /etc/passwd
+awk -F',' '{print $2}' data.csv
+awk -F'|' '{print $1,$3}' data.txt
+
+
+Character slicing with substr()
+awk '{print substr($0,1,5)}' file.txt
+awk '{print substr($0,3,8)}' file.txt
+awk '{print substr($0,5)}' file.txt
+
+
+Syntax:
+substr(string, starting_position, length)
+
+
+Conditional extraction
+awk -F';' '$2=="admin" {print $1}' creds.txt
+awk 'length($0)>10' file.txt
+awk 'length($0)<5' file.txt
+awk 'NR==5 {print}' file.txt
+awk 'NR>=5 && NR<=10' file.txt
+
+
+Extract unique usernames
+awk -F';' '!seen[$1]++ {print $1}' creds.txt
+
+
+
+3. sed – Delete, replace and truncate text
+sed is useful for modifying text without opening an editor.
+Remove characters
+sed 's/hello//' file.txt
+sed 's/^...//' file.txt
+sed 's/.....$//' file.txt
+
+
+Explanation:
+- ^ = Beginning of line.
+- $ = End of line.
+- . = Any single character.
+- ... = Three characters.
+Replace delimiters
+sed 's/;/ /g' file.txt
+sed 's/:/;/g' file.txt
+sed 's/,/;/g' file.txt
+
+
+Extract specific lines
+sed -n '5p' file.txt
+sed -n '5,10p' file.txt
+sed -n '1,20p' file.txt
+
+
+Delete lines
+sed '1d' file.txt
+sed '5d' file.txt
+sed '1,5d' file.txt
+sed '/admin/d' file.txt
+sed '/^$/d' file.txt
+
+
+Remove prefixes and suffixes
+sed 's/^.*;//' file.txt
+sed 's/;.*$//' file.txt
+
+
+
+4. grep – Search and filter text
+Basic searches
+grep "admin" file.txt
+grep -i "admin" file.txt
+grep -v "admin" file.txt
+grep -n "admin" file.txt
+grep -c "admin" file.txt
+
+
+Option	Purpose
+-i	Ignore case
+-v	Invert match
+-n	Show line number
+-c	Count matches
+-o	Print only matching text
+-E	Extended regex
+-r	Recursive search
+-w	Match whole word
+
+Regex extraction
+grep -oE '[0-9]+' file.txt
+grep -oE '[a-zA-Z]+' file.txt
+grep -oE '[a-zA-Z0-9]+' file.txt
+grep -oE '[0-9]{4,}' file.txt
+grep -oE '[^;]+' file.txt
+
+
+Find interesting CTF strings
+grep -iE 'flag|password|secret|token|admin' file.txt
+grep -iE 'cyber|ctf|htb|thm' file.txt
+grep -E '^[0-9]+' file.txt
+grep -E '^[a-zA-Z0-9_]+$' file.txt
+
+
+
+5. tr – Translate, delete and squeeze characters
+Character transformations
+tr 'a-z' 'A-Z' < file.txt
+tr 'A-Z' 'a-z' < file.txt
+tr '0-9' 'X' < file.txt
+
+
+Delete characters
+tr -d ' ' < file.txt
+tr -d '\n' < file.txt
+tr -d '\r' < file.txt
+tr -d '[:punct:]' < file.txt
+tr -d '[:digit:]' < file.txt
+
+
+Remove or normalize whitespace
+tr -s ' ' < file.txt
+tr -s '\n' < file.txt
+tr '\t' ' ' < file.txt
+
+
+Reverse alphabet (ROT13)
+tr 'A-Za-z' 'N-ZA-Mn-za-m' < file.txt
+
+
+
+6. head and tail – Extract lines
+head file.txt
+head -n 5 file.txt
+head -n 20 file.txt
+tail file.txt
+tail -n 5 file.txt
+tail -n 20 file.txt
+tail -f access.log
+
+
+Remove first or last lines
+tail -n +6 file.txt
+head -n -5 file.txt
+
+
+- tail -n +6 = Start from line 6.
+- head -n -5 = Remove last 5 lines.
+
+7. sort and uniq – Wordlist processing
+Very useful for password lists and username enumeration.
+sort file.txt
+sort -r file.txt
+sort -u file.txt
+sort -n file.txt
+sort -f file.txt
+
+
+Duplicate detection
+uniq file.txt
+uniq -c file.txt
+uniq -d file.txt
+uniq -u file.txt
+
+
+Remember: uniq detects adjacent duplicates, so sort first.
+sort file.txt | uniq
+sort file.txt | uniq -c
+sort file.txt | uniq -d
+
+
+Remove duplicates and save
+sort -u passwords.txt > clean_passwords.txt
+
+
+
+8. paste and join – Combine text files
+Combine side-by-side
+paste users.txt passwords.txt
+paste -d';' users.txt passwords.txt
+
+
+Combine files line-by-line
+paste -s file.txt
+
+
+Join matching records
+join users.txt passwords.txt
+
+
+For join, both files should be sorted by their matching key.
+
+9. rev – Reverse text
+rev file.txt
+echo "admin" | rev
+
+
+Example:
+Input:  cyberstrike
+Output: ekirtsrebyc
+
+
+Useful for reversing strings in basic encoding challenges.
+
+10. fold – Split long lines
+fold -w 10 file.txt
+fold -w 5 file.txt
+fold -s -w 20 file.txt
+
+
+- -w = Maximum width.
+- -s = Break at spaces where possible.
+Useful for long Base64 strings and encoded challenge output.
+
+🧠 CTF Practical Recipes
+These are combinations you'll frequently use during challenges.
+1. Extract usernames from credential dumps
+cut -d';' -f1 creds-dump.txt > users.txt
+
+
+2. Extract passwords
+cut -d';' -f2 creds-dump.txt > passwords.txt
+
+
+3. Extract usernames and remove duplicates
+cut -d';' -f1 creds-dump.txt | sort -u > users.txt
+
+
+4. Extract passwords longer than 8 characters
+awk 'length($0)>8' passwords.txt
+
+
+5. Extract emails
+grep -oE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' file.txt
+
+
+6. Extract IP addresses
+grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' file.txt
+
+
+This matches IP-like strings; it does not validate whether each address is a valid IPv4 address.
+7. Extract hexadecimal strings
+grep -oE '0x[0-9a-fA-F]+' file.txt
+
+
+8. Remove blank lines
+sed '/^$/d' file.txt
+
+
+9. Remove Windows carriage returns
+tr -d '\r' < file.txt > clean.txt
+
+
+10. Extract text after semicolon
+sed 's/^.*;//' file.txt
+
+
+11. Extract text before semicolon
+sed 's/;.*$//' file.txt
+
+
+12. Get first 8 characters from every line
+cut -c1-8 file.txt
+
+
+13. Get last 5 characters from every line
+awk '{print substr($0,length($0)-4)}' file.txt
+
+
+14. Count unique lines
+sort -u file.txt | wc -l
+
+
+15. Find longest lines
+awk '{print length($0),$0}' file.txt | sort -rn | head
+
+
+
+⚡ Quick Command Reference
+Task	Command
+First column	cut -d';' -f1 file
+Last column	awk -F';' '{print $NF}' file
+First 5 chars	cut -c1-5 file
+Last 5 chars	rev file \| cut -c1-5 \| rev
+Remove first 3 chars	cut -c4- file
+Remove last 3 chars	sed 's/...$//' file
+Before delimiter	cut -d';' -f1 file
+After delimiter	cut -d';' -f2- file
+Remove blank lines	grep -v '^$' file
+Remove duplicates	sort -u file
+Reverse lines	rev file
+Uppercase	tr 'a-z' 'A-Z'
+Lowercase	tr 'A-Z' 'a-z'
+Count lines	wc -l file
+Count words	wc -w file
+Count characters	wc -m file
+Count bytes	wc -c file
