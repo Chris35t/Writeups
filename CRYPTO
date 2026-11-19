@@ -1,0 +1,194 @@
+One time pad
+
+def two_time_pad_attack(c1, c2, known_plain):
+    xored = bytes([a ^ b for a, b in zip(c1, c2)])
+    recovered = bytes([x ^ y for x, y in zip(xored, known_plain)])
+    return recovered
+
+# Ciphertexts (hexadecimal)
+cipher1 = bytes.fromhex("0e0b0c1a")
+cipher2 = bytes.fromhex("0a0f091f")
+
+# Known plaintext of the first message
+plaintext1 = b"flag"
+
+# Recover corresponding fragment of second plaintext
+recovered = two_time_pad_attack(cipher1, cipher2, plaintext1)
+
+print("Recovered fragment:", recovered)
+print("As text:", recovered.decode(errors="replace"))
+
+AES
+Bro, for CTF crypto challenges, you need an **AES multi-mode toolkit**, not just one decryption script.
+
+One important thing: there is no universal AES decrypt command. You need to identify the mode (ECB, CBC, CTR, GCM, CFB, OFB), key format, IV/nonce, and padding.
+
+I'll give you a reusable Python script with input placeholders. You can use it for most AES CTF challenges where the required key and parameters are available.
+
+# **1. Install dependencies**
+
+```
+pip install pycryptodome
+```
+
+# **2. Universal AES CTF toolkit**
+
+
+
+Copy-paste ready
+
+Multiple AES modes
+
+
+
+This script supports:
+
+- AES-ECB
+- AES-CBC
+- AES-CTR
+- AES-CFB
+- AES-OFB
+- AES-GCM
+- Hex, Base64 and text inputs
+- PKCS#7 unpadding
+- Automatic plaintext display
+
+## **3. Python script**
+
+Create a file:
+
+```
+nano aes_toolkit.py
+```
+
+Paste this complete code:
+
+```
+import base64from Crypto.Cipher import AESfrom Crypto.Util.Padding import unpad# ==========================================# AES CTF DECRYPTION TOOLKIT# ==========================================# -------- INPUT CONFIGURATION --------MODE = "CBC"       # ECB / CBC / CTR / CFB / OFB / GCMKEY_FORMAT = "hex"       # hex / text / base64KEY = "00112233445566778899aabbccddeeff"CT_FORMAT = "hex"        # hex / text / base64CIPHERTEXT = "YOUR_CIPHERTEXT_HERE"IV_FORMAT = "hex"IV = "YOUR_IV_HERE"NONCE_FORMAT = "hex"NONCE = "YOUR_NONCE_HERE"TAG_FORMAT = "hex"TAG = "YOUR_GCM_TAG_HERE"# For CTR modeINITIAL_COUNTER = 0# For CFB modeCFB_SEGMENT_SIZE = 128# Padding options: True / FalseUSE_PADDING = True
+```
+
+## **4. How to enter your CTF values**
+
+Let's say your challenge gives you:
+
+```
+Algorithm: AES-256-CBC
+Key:       00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
+IV:        000102030405060708090a0b0c0d0e0f
+Ciphertext: 8a1f...your_hex_ciphertext
+```
+
+Change the configuration:
+
+```
+MODE = "CBC"KEY_FORMAT = "hex"KEY = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"CT_FORMAT = "hex"CIPHERTEXT = "8a1f...your_hex_ciphertext"IV_FORMAT = "hex"IV = "000102030405060708090a0b0c0d0e0f"USE_PADDING = True
+```
+
+Run:
+
+```
+python3 aes_toolkit.py
+```
+
+**Remember:** The example key and ciphertext are placeholders, not a real matching encryption pair.
+
+## **5. AES modes cheat sheet for CTFs**
+
+| Mode | Required inputs       | Padding        |
+| ---- | --------------------- | -------------- |
+| ECB  | Key                   | Usually PKCS#7 |
+| CBC  | Key + IV              | Usually PKCS#7 |
+| CTR  | Key + Nonce + Counter | No             |
+| CFB  | Key + IV              | No             |
+| OFB  | Key + IV              | No             |
+| GCM  | Key + Nonce + Tag     | No             |
+
+### **Which mode should you use?**
+
+ECB
+
+**Repeated ciphertext blocks**
+
+Look for repeated 16-byte blocks. Investigate ECB suffix attacks and byte-at-a-time decryption if an encryption oracle is available.
+
+CBC
+
+**IV + ciphertext**
+
+Investigate bit-flipping attacks and padding oracle vulnerabilities if the application exposes distinguishable padding errors.
+
+CTR
+
+**Nonce + counter**
+
+Investigate nonce reuse, known-plaintext attacks and repeated keystream attacks.
+
+CFB / OFB
+
+**IV + ciphertext**
+
+Investigate IV reuse, predictable inputs and malleability properties.
+
+GCM
+
+**Nonce + ciphertext + tag**
+
+Investigate nonce reuse and authentication weaknesses. GCM authentication must be verified using the tag.
+
+These are attack directions, not automatic decryption methods. Your uploaded AES notes cover these concepts, including ECB suffix extraction, CBC bit flipping, padding oracles and CTR keystream reuse.
+
+## **6. Important troubleshooting**
+
+| Error                    | Possible reason                                 |
+| ------------------------ | ----------------------------------------------- |
+| Incorrect AES key length | Key is not 16, 24 or 32 bytes                   |
+| Data must be aligned     | ECB/CBC ciphertext isn't a multiple of 16 bytes |
+| Padding is incorrect     | Wrong key, IV, mode or padding assumption       |
+| MAC check failed         | GCM key, nonce, tag or AAD is incorrect         |
+| Incorrect output         | Wrong encoding, mode or counter configuration   |
+
+**Important CTF tips:**
+
+1. Hex strings must have an even number of characters.
+2. AES block size is always 16 bytes, regardless of key size.
+3. Never apply PKCS#7 unpadding to CTR, CFB, OFB or GCM.
+4. GCM may require additional authenticated data (AAD), which this basic script doesn't configure.
+5. CTR challenges sometimes provide a complete initial counter block instead of a separate nonce. The counter construction must match the challenge.
+
+## **7. Your AES CTF solving workflow**
+
+1. **Identify encryption**
+
+   AES-128, AES-192 or AES-256?
+2. **Identify mode**
+
+   ECB, CBC, CTR, CFB, OFB or GCM?
+3. **Identify encoding**
+
+   Hex, Base64, ASCII or raw bytes?
+4. **Find parameters**
+
+   Key, IV, nonce, counter, tag and possible AAD.
+5. **Try normal decryption**
+
+   Use the toolkit above.
+6. **Investigate weaknesses**
+
+   Nonce reuse, padding oracle, ECB oracle, known plaintext, etc.
+7. **Validate output**
+
+   Look for `flag{}`, `CTF{}`, readable strings or expected file signatures.
+
+## **8. Practice these AES attacks**
+
+| Topic                         | Practice resource                                                                             |
+| ----------------------------- | --------------------------------------------------------------------------------------------- |
+| ECB byte-at-a-time            | [Cryptopals Challenge 12](https://cryptopals.com/sets/2/challenges/12?utm_source=chatgpt.com) |
+| ECB suffix with random prefix | [Cryptopals Challenge 14](https://cryptopals.com/sets/2/challenges/14?utm_source=chatgpt.com) |
+| CBC bit flipping              | [Cryptopals Challenge 16](https://cryptopals.com/sets/2/challenges/16?utm_source=chatgpt.com) |
+| CBC padding oracle            | [Cryptopals Challenge 17](https://cryptopals.com/sets/3/challenges/17?utm_source=chatgpt.com) |
+| CTR attacks                   | [Cryptopals Set 3](https://cryptopals.com/sets/3?utm_source=chatgpt.com)                      |
+
+**My recommendation:** Keep `aes_toolkit.py` in your `/media/sf_E_DRIVE/ctftools/` directory. Use it as your first step whenever you encounter an AES challenge.
+
+The most important skill is learning to identify the weakness, not simply trying every AES mode until something works.
